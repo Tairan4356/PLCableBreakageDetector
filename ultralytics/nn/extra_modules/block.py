@@ -14,7 +14,7 @@ from .ops_dcnv3.modules import DCNv3, DCNv3_DyHead
 from .orepa import *
 from .RFAConv import *
 #from ultralytics.utils.torch_utils import make_divisible
-from timm.models.layers import DropPath, trunc_normal_, to_2tuple
+from timm.models.layers import trunc_normal_
 
 __all__ = ['DyHeadBlock', 'FeaturePyramidSharedConv', 'DyHeadBlockWithDCNV3', 'Fusion', 'C2f_Faster', 'C3_Faster', 'C3_ODConv', 'C2f_ODConv', 'Partial_conv3', 'C2f_Faster_EMA', 'C3_Faster_EMA', 'C2f_DBB',
            'GSConv', 'VoVGSCSP', 'VoVGSCSPC', 'C2f_CloAtt', 'C3_CloAtt', 'SCConv', 'C3_SCConv', 'C2f_SCConv', 'ScConv', 'C3_ScConv', 'C2f_ScConv',
