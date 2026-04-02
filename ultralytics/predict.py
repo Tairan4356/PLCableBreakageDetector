@@ -1,9 +1,9 @@
 import sys
-sys.path.insert(0, "/home/jiayuan/ultralytics-main/ultralytics")
-
+# 现在就可以导入Yolo类了
 from ultralytics import YOLO
 
+if __name__ == '__main__':
 
-number = 3 #input how many tasks in your work
-model = YOLO('/home/jiayuan/ultralytics-main/ultralytics/runs/best.pt')  # Validate the model
-model.predict(source='/data/jiayuan/dash_camara_dataset/daytime', imgsz=(384,672), device=[3],name='v4_daytime', save=True, conf=0.25, iou=0.45, show_labels=False)
+    number = 2 #input how many tasks in your work
+    model = YOLO("/content/PowerLine-MTYOLO-NANO-150Epochs.pt")  # Validate the model
+    model.predict(source='/content/MulticableData/MulticableData/images/val2017', imgsz=(640,640), device=[0],name='FTMAPS', augment=False,save=True,task='multi', conf=0.25, iou=0.45,  show_labels=True)
