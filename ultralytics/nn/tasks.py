@@ -6,11 +6,15 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
+from scipy.optimize import tnc
+
 from ultralytics.nn.extra_modules import *
 from ultralytics.nn.modules import (AIFI, C1, C2, C3, C3TR, SPP, SPPF, Bottleneck, BottleneckCSP, C2f, C3Ghost, C3x,
-                                    Classify, Concat, Conv, ConvTranspose, Detect, Detect_Efficient, DWConv, DWConvTranspose2d, Focus,
+                                    Classify, Concat, Conv, ConvTranspose, Detect, Detect_Efficient, DWConv,
+                                    DWConvTranspose2d, Focus,
                                     GhostBottleneck, GhostConv, HGBlock, HGStem, Pose, RepC3, RepConv, RTDETRDecoder,
-                                    Segment, Concat_dropout)
+                                    Segment, Concat_dropout,
+                                    Attention, C3k, C3k2, C2PSA, CoordAttDistillation, EdgeEnhancer)  # New blocks
 from ultralytics.yolo.utils import DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS, LOGGER, colorstr, emojis, yaml_load
 from ultralytics.yolo.utils.checks import check_requirements, check_suffix, check_yaml
 from ultralytics.yolo.utils.plotting import feature_visualization
@@ -153,7 +157,7 @@ class BaseModel(nn.Module):
         """
         self = super()._apply(fn)
         m = self.model[-1]  # Detect()
-        if isinstance(m, (Detect, Segment,Detect_Efficient)):
+        if isinstance(m, (Detect, Segment, Detect_Efficient)):
             m.stride = fn(m.stride)
             m.anchors = fn(m.anchors)
             m.strides = fn(m.strides)
@@ -172,7 +176,7 @@ class BaseModel(nn.Module):
         self.load_state_dict(csd, strict=False)  # load
         if verbose:
             LOGGER.info(f'Transferred {len(csd)}/{len(self.model.state_dict())} items from pretrained weights')
-            
+
 
 class MultiBaseModel(nn.Module):
     """
@@ -194,31 +198,30 @@ class MultiBaseModel(nn.Module):
         """
         return self._forward_once(x, profile, visualize)
 
-#     def _forward_once(self, x, profile=False, visualize=False):
-#         """
-#         Perform a forward pass through the network.
+    #     def _forward_once(self, x, profile=False, visualize=False):
+    #         """
+    #         Perform a forward pass through the network.
 
-#         Args:
-#             x (torch.Tensor): The input tensor to the model
-#             profile (bool):  Print the computation time of each layer if True, defaults to False.
-#             visualize (bool): Save the feature maps of the model if True, defaults to False
+    #         Args:
+    #             x (torch.Tensor): The input tensor to the model
+    #             profile (bool):  Print the computation time of each layer if True, defaults to False.
+    #             visualize (bool): Save the feature maps of the model if True, defaults to False
 
-#         Returns:
-#             (torch.Tensor): The last output of the model.
-#         """
-#         y, dt = [], []  # outputs
-#         for m in self.model:
-#             if m.f != -1:  # if not from previous layer
-#                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
-#             if profile:
-#                 self._profile_one_layer(m, x, dt)
-#             x = m(x)  # run
-#             y.append(x if m.i in self.save else None)  # save output
-#             if visualize:
-#                 feature_visualization(x, m.type, m.i, save_dir=visualize)
-#         return x
-    
-    
+    #         Returns:
+    #             (torch.Tensor): The last output of the model.
+    #         """
+    #         y, dt = [], []  # outputs
+    #         for m in self.model:
+    #             if m.f != -1:  # if not from previous layer
+    #                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
+    #             if profile:
+    #                 self._profile_one_layer(m, x, dt)
+    #             x = m(x)  # run
+    #             y.append(x if m.i in self.save else None)  # save output
+    #             if visualize:
+    #                 feature_visualization(x, m.type, m.i, save_dir=visualize)
+    #         return x
+
     def _forward_once(self, x, profile=False, visualize=False):
         """
         This output will return whole head result. the sequence is object detection, drivable area seg and lane seg. 
@@ -229,14 +232,13 @@ class MultiBaseModel(nn.Module):
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
             x = m(x)  # run
 
-            if isinstance(m, (Detect, Segment,Detect_Efficient)):  # if it's a task head
+            if isinstance(m, (Detect, Segment, Detect_Efficient)):  # if it's a task head
                 outputs.append(x)
             # y.append(x)
             y.append(x if m.i in self.save else None)  # save output
             if visualize:
                 feature_visualization(x, m.type, m.i, save_dir=visualize)
         return outputs
-
 
     def _profile_one_layer(self, m, x, dt):
         """
@@ -311,25 +313,25 @@ class MultiBaseModel(nn.Module):
         """
         return model_info(self, detailed=detailed, verbose=verbose, imgsz=imgsz)
 
-#     def _apply(self, fn):
-#         """
-#         `_apply()` is a function that applies a function to all the tensors in the model that are not
-#         parameters or registered buffers
+    #     def _apply(self, fn):
+    #         """
+    #         `_apply()` is a function that applies a function to all the tensors in the model that are not
+    #         parameters or registered buffers
 
-#         Args:
-#             fn: the function to apply to the model
+    #         Args:
+    #             fn: the function to apply to the model
 
-#         Returns:
-#             A model that is a Detect() object.
-#         """
-#         self = super()._apply(fn)
-#         m = self.model[-1]  # Detect()
-#         if isinstance(m, (Detect, Segment)):
-#             m.stride = fn(m.stride)
-#             m.anchors = fn(m.anchors)
-#             m.strides = fn(m.strides)
-#         return self
-    
+    #         Returns:
+    #             A model that is a Detect() object.
+    #         """
+    #         self = super()._apply(fn)
+    #         m = self.model[-1]  # Detect()
+    #         if isinstance(m, (Detect, Segment)):
+    #             m.stride = fn(m.stride)
+    #             m.anchors = fn(m.anchors)
+    #             m.strides = fn(m.strides)
+    #         return self
+
     def _apply(self, fn):
         """
         `_apply()` is a function that applies a function to all the tensors in the model that are not
@@ -343,12 +345,11 @@ class MultiBaseModel(nn.Module):
         """
         self = super()._apply(fn)
         for m in self.model[-3:]:  # Iterate over the last three layers
-            if isinstance(m, (Detect, Segment,Detect_Efficient)):
+            if isinstance(m, (Detect, Segment, Detect_Efficient)):
                 m.stride = fn(m.stride)
                 m.anchors = fn(m.anchors)
                 m.strides = fn(m.strides)
         return self
-
 
     def load(self, weights, verbose=True):
         """Load the weights into the model.
@@ -383,7 +384,7 @@ class DetectionModel(BaseModel):
 
         # Build strides
         for m in self.model:
-            if isinstance(m, (Detect, Segment, Pose,Detect_Efficient)):
+            if isinstance(m, (Detect, Segment, Pose, Detect_Efficient)):
                 s = 256  # 2x min stride
                 m.inplace = self.inplace
                 forward = lambda x: self.forward(x)[0] if isinstance(m, (Segment, Pose)) else self.forward(x)
@@ -440,7 +441,7 @@ class DetectionModel(BaseModel):
         y[-1] = y[-1][..., i:]  # small
         return y
 
-    
+
 class MultiModel(MultiBaseModel):
     """YOLOv8 detection and segmentation model."""
 
@@ -461,12 +462,13 @@ class MultiModel(MultiBaseModel):
         # Build strides
         count = 0
         for m in self.model:
-        # m = self.model[-1]  # Detect()
-            if isinstance(m, (Detect, Segment, Pose,Detect_Efficient)):
+            # m = self.model[-1]  # Detect()
+            if isinstance(m, (Detect, Segment, Pose, Detect_Efficient)):
                 s = 256  # 2x min stride
                 m.inplace = self.inplace
 
-                forward = lambda x: self.forward(x)[count][0] if isinstance(m, (Segment, Pose)) else self.forward(x)[count]
+                forward = lambda x: self.forward(x)[count][0] if isinstance(m, (Segment, Pose)) else self.forward(x)[
+                    count]
                 m.stride = torch.tensor([s / x.shape[-2] for x in forward(torch.zeros(1, ch, s, s))])  # forward
 
                 # outputs = forward(torch.zeros(1, ch, s, s))
@@ -488,7 +490,7 @@ class MultiModel(MultiBaseModel):
                     m.bias_init()  # only run once for detection
                 except:
                     pass
-                count = count+1
+                count = count + 1
 
         # Init weights, biases
         initialize_weights(self)
@@ -501,7 +503,6 @@ class MultiModel(MultiBaseModel):
         if augment:
             return self._forward_augment(x)  # augmented inference, None
         return self._forward_once(x, profile, visualize)  # single-scale inference, train
-
 
     def _forward_augment(self, x):
         """Perform augmentations on input image x and return augmented inference and train outputs."""
@@ -539,7 +540,6 @@ class MultiModel(MultiBaseModel):
             indices = (y[i].shape[-1] // g[i]) * sum(4 ** x for x in range(e))  # indices
             y[i] = y[i][..., :-indices] if i == 0 else y[i][..., indices:]  # clip tails
         return y
-
 
 
 #     def _forward_augment(self, x):
@@ -708,7 +708,7 @@ def torch_safe_load(weight):
     check_suffix(file=weight, suffix='.pt')
     file = attempt_download_asset(weight)  # search online if missing locally
     try:
-        return torch.load(file, map_location='cpu',weights_only=False), file  # load
+        return torch.load(file, map_location='cpu', weights_only=False), file  # load
     except ModuleNotFoundError as e:  # e.name is missing module name
         if e.name == 'models':
             raise TypeError(
@@ -723,7 +723,7 @@ def torch_safe_load(weight):
                        f"run a command with an official YOLOv8 model, i.e. 'yolo predict model=yolov8n.pt'")
         check_requirements(e.name)  # install missing module
 
-        return torch.load(file, map_location='cpu',weights_only=False), file  # load
+        return torch.load(file, map_location='cpu', weights_only=False), file  # load
 
 
 def attempt_load_weights(weights, device=None, inplace=True, fuse=False):
@@ -748,7 +748,7 @@ def attempt_load_weights(weights, device=None, inplace=True, fuse=False):
     # Module compatibility updates
     for m in ensemble.modules():
         t = type(m)
-        if t in (nn.Hardswish, nn.LeakyReLU, nn.ReLU, nn.ReLU6, nn.SiLU, Detect, Segment,Detect_Efficient):
+        if t in (nn.Hardswish, nn.LeakyReLU, nn.ReLU, nn.ReLU6, nn.SiLU, Detect, Segment, Detect_Efficient):
             m.inplace = inplace  # torch 1.7.0 compatibility
         elif t is nn.Upsample and not hasattr(m, 'recompute_scale_factor'):
             m.recompute_scale_factor = None  # torch 1.11.0 compatibility
@@ -784,7 +784,7 @@ def attempt_load_one_weight(weight, device=None, inplace=True, fuse=False):
     # Module compatibility updates
     for m in model.modules():
         t = type(m)
-        if t in (nn.Hardswish, nn.LeakyReLU, nn.ReLU, nn.ReLU6, nn.SiLU, Detect, Segment,Detect_Efficient):
+        if t in (nn.Hardswish, nn.LeakyReLU, nn.ReLU, nn.ReLU6, nn.SiLU, Detect, Segment, Detect_Efficient):
             m.inplace = inplace  # torch 1.7.0 compatibility
         elif t is nn.Upsample and not hasattr(m, 'recompute_scale_factor'):
             m.recompute_scale_factor = None  # torch 1.11.0 compatibility
@@ -825,19 +825,30 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
                     args[j] = locals()[a] if a in locals() else ast.literal_eval(a)
 
         n = n_ = max(round(n * depth), 1) if n > 1 else n  # depth gain
-        if m in (Classify, Conv, FeaturePyramidSharedConv,  ConvTranspose, GhostConv, Bottleneck, GhostBottleneck, SPP, SPPF, DWConv, Focus,
-                 BottleneckCSP, C1, C2, C2f, C3, C3TR, C3Ghost, nn.ConvTranspose2d, DWConvTranspose2d, C3x, RepC3, RFCAConv,GSConv,VoVGSCSP,C2f_RFCAConv,C2f_DySnakeConv,C2f_DWR,
-                 C3_AKConv, C2f_AKConv, AKConv):
+        if m in (
+                Classify, Conv, FeaturePyramidSharedConv, ConvTranspose, GhostConv, Bottleneck, GhostBottleneck, SPP,
+                SPPF,
+                DWConv, Focus,
+                BottleneckCSP, C1, C2, C2f, C3, C3TR, C3Ghost, nn.ConvTranspose2d, DWConvTranspose2d, C3x, RepC3,
+                RFCAConv,
+                GSConv, VoVGSCSP, C2f_RFCAConv, C2f_DySnakeConv, C2f_DWR,
+                C3_AKConv, C2f_AKConv, AKConv,
+                Attention, C3k, C3k2, C2PSA, EdgeEnhancer):  # New blocks
             c1, c2 = ch[f], args[0]
             if c2 != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
                 c2 = make_divisible(min(c2, max_channels) * width, 8)
 
             args = [c1, c2, *args[1:]]
-            if m in (BottleneckCSP, C1, C2, C2f, C3, C3TR, C3Ghost, C3x, RepC3,C2f_RFCAConv,C2f_DWR,C2f_DySnakeConv,VoVGSCSP, C3_AKConv, C2f_AKConv):
+            if m in (
+                    BottleneckCSP, C1, C2, C2f, C3, C3TR, C3Ghost, C3x, RepC3, C2f_RFCAConv, C2f_DWR, C2f_DySnakeConv,
+                    VoVGSCSP,
+                    C3_AKConv, C2f_AKConv, C3k, C3k2, C2PSA):
                 args.insert(2, n)  # number of repeats
                 n = 1
+
         elif m is AIFI:
             args = [ch[f], *args]
+
         elif m in (HGStem, HGBlock):
             c1, cm, c2 = ch[f], args[0], args[1]
             args = [c1, cm, c2, *args[2:]]
@@ -847,20 +858,29 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
 
         elif m is nn.BatchNorm2d:
             args = [ch[f]]
+
         elif m is Concat:
             c2 = sum(ch[x] for x in f)
+
         elif m is Concat_dropout:
             c2 = ch[-1]
             ch_list = [ch[x] for x in f]
-        elif m in (Detect, Segment, Pose, RTDETRDecoder,Detect_Efficient):
+
+        elif m is CoordAttDistillation:
+            c2 = ch[f[0]]
+            args = [[ch[x] for x in f], *args]
+
+        elif m in (Detect, Segment, Pose, RTDETRDecoder, Detect_Efficient):
             args.append([ch[x] for x in f])
             if m is Segment:
                 args[2] = make_divisible(min(args[2], max_channels) * width, 8)
+
         else:
             c2 = ch[f]
+
         ###### Jiayuan
         if 'Concat_dropout' in str(m):
-            m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args,ch=ch_list)
+            m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args, ch=ch_list)
         else:
             m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module
         ######
