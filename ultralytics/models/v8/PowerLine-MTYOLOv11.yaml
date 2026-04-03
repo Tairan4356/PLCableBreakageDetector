@@ -1,4 +1,4 @@
-# train and val result at folder No.3
+# result at train folder No.3 and val folder No.4
 tnc: 2  # number of classes
 
 scales:
