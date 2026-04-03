@@ -16,7 +16,9 @@ if __name__ == '__main__':
                 pretrained=False,
                 rect=True,  # !-- Keep this line --!
                 task='multi',
+                box=10.0,
                 cls=2.0,
+                dfl=2.5,
                 degrees=10.0,
                 scale=0.6,
                 mixup=0.15,
