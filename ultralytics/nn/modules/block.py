@@ -13,7 +13,7 @@ from .transformer import TransformerBlock
 __all__ = [
     'DFL', 'HGBlock', 'HGStem', 'SPP', 'SPPF', 'C1', 'C2', 'C3', 'C2f', 'C3x', 'C3TR', 'C3Ghost', 'GhostBottleneck',
     'Bottleneck', 'BottleneckCSP', 'Proto', 'RepC3',
-    "Attention", "C3k", "C3k2", "C2PSA", "CoordAttDistillation", "EdgeEnhancer"]  # New blocks
+    "Attention", "C3k", "C3k2", "C2PSA", "CoordAttDistillation", "EdgeEnhancer", "SimAM"]  # New blocks
 
 
 class DFL(nn.Module):
@@ -572,3 +572,21 @@ class EdgeEnhancer(nn.Module):
     def forward(self, x):
         edge = x - self.avg_pool(x)
         return x + torch.sigmoid(edge) * self.conv(x)
+
+
+class SimAM(nn.Module):
+    def __init__(self, channels=None, e_lambda=1e-4):
+        """
+        SimAM: A Simple, Parameter-Free Attention Module for Convolutional Neural Networks
+        e_lambda: Penalty term, used to prevent the denominator from becoming zero; default value is 1e-4
+        """
+        super(SimAM, self).__init__()
+        self.activation = nn.Sigmoid()
+        self.e_lambda = e_lambda
+
+    def forward(self, x):
+        b, c, h, w = x.size()
+        n = w * h - 1
+        x_minus_mu_sq = (x - x.mean(dim=[2, 3], keepdim=True)).pow(2)
+        y = x_minus_mu_sq / (4 * (x_minus_mu_sq.sum(dim=[2, 3], keepdim=True) / n + self.e_lambda)) + 0.5
+        return x * self.activation(y)

@@ -14,7 +14,8 @@ from ultralytics.nn.modules import (AIFI, C1, C2, C3, C3TR, SPP, SPPF, Bottlenec
                                     DWConvTranspose2d, Focus,
                                     GhostBottleneck, GhostConv, HGBlock, HGStem, Pose, RepC3, RepConv, RTDETRDecoder,
                                     Segment, Concat_dropout,
-                                    Attention, C3k, C3k2, C2PSA, CoordAttDistillation, EdgeEnhancer)  # New blocks
+                                    Attention, C3k, C3k2, C2PSA, CoordAttDistillation, EdgeEnhancer,
+                                    SimAM)  # New blocks
 from ultralytics.yolo.utils import DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS, LOGGER, colorstr, emojis, yaml_load
 from ultralytics.yolo.utils.checks import check_requirements, check_suffix, check_yaml
 from ultralytics.yolo.utils.plotting import feature_visualization
@@ -870,7 +871,14 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             c2 = ch[f[0]]
             args = [[ch[x] for x in f], *args]
 
+        elif m is SimAM:
+            c2 = ch[f]
+            args = [c2, *args]
+
         elif m in (Detect, Segment, Pose, RTDETRDecoder, Detect_Efficient):
+            if not isinstance(f, list):
+                f = [f]
+
             args.append([ch[x] for x in f])
             if m is Segment:
                 args[2] = make_divisible(min(args[2], max_channels) * width, 8)
