@@ -16,7 +16,7 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.cuda import amp
+from torch import amp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import lr_scheduler
 from tqdm import tqdm
@@ -33,6 +33,7 @@ from ultralytics.yolo.utils.files import get_latest_run, increment_path
 from ultralytics.yolo.utils.torch_utils import (EarlyStopping, ModelEMA, de_parallel, init_seeds, one_cycle,
                                                 select_device, strip_optimizer)
 import itertools
+
 
 class BaseTrainer:
     """
@@ -199,7 +200,7 @@ class BaseTrainer:
         torch.cuda.set_device(RANK)
         self.device = torch.device('cuda', RANK)
         LOGGER.info(f'DDP settings: RANK {RANK}, WORLD_SIZE {world_size}, DEVICE {self.device}')
-        os.environ['NCCL_BLOCKING_WAIT'] = '1'  # set to enforce timeout
+        os.environ['TORCH_NCCL_BLOCKING_WAIT'] = '1'  # set to enforce timeout
         dist.init_process_group('nccl' if dist.is_nccl_available() else 'gloo',
                                 timeout=timedelta(seconds=3600),
                                 rank=RANK,
@@ -223,14 +224,15 @@ class BaseTrainer:
         if RANK > -1:  # DDP
             dist.broadcast(self.amp, src=0)  # broadcast the tensor from rank 0 to all other ranks (returns None)
         self.amp = bool(self.amp)  # as boolean
-        self.scaler = amp.GradScaler(enabled=self.amp)
+        self.scaler = amp.GradScaler('cuda', enabled=self.amp)
         if world_size > 1:
             ######Jiayuan
-            self.model = DDP(self.model, device_ids=[RANK],broadcast_buffers=False, find_unused_parameters=True)
+            self.model = DDP(self.model, device_ids=[RANK], broadcast_buffers=False, find_unused_parameters=True)
             ######
         # Check imgsz
         try:
-            gs = max(int(self.model.stride.max() if hasattr(self.model, 'stride') else 32), 32) # grid size (max stride)
+            gs = max(int(self.model.stride.max() if hasattr(self.model, 'stride') else 32),
+                     32)  # grid size (max stride)
         except:
             gs = max(max(itertools.chain.from_iterable(self.model.stride)) if hasattr(self.model, 'stride') else 0, 32)
         self.args.imgsz = check_imgsz(self.args.imgsz, stride=gs, floor=gs, max_dim=1)
@@ -265,10 +267,12 @@ class BaseTrainer:
             if self.args.task == "multi":
                 self.test_loader = self.get_dataloader(self.testset, batch_size=batch_size * 2, rank=-1, mode='val')
                 self.validator = self.get_validator()
-                metric_keys_det = self.validator.metrics_det.keys + self.label_loss_items(prefix='val', task = 'det')
-                metric_keys_seg = self.validator.metrics_seg.keys + self.label_loss_items(prefix='val', task = 'seg')
-                self.metrics_det = dict(zip(metric_keys_det, [0] * len(metric_keys_det)))  # TODO: init metrics for plot_results()?
-                self.metrics_seg = dict(zip(metric_keys_seg, [0] * len(metric_keys_seg)))  # TODO: init metrics for plot_results()?
+                metric_keys_det = self.validator.metrics_det.keys + self.label_loss_items(prefix='val', task='det')
+                metric_keys_seg = self.validator.metrics_seg.keys + self.label_loss_items(prefix='val', task='seg')
+                self.metrics_det = dict(
+                    zip(metric_keys_det, [0] * len(metric_keys_det)))  # TODO: init metrics for plot_results()?
+                self.metrics_seg = dict(
+                    zip(metric_keys_seg, [0] * len(metric_keys_seg)))  # TODO: init metrics for plot_results()?
                 self.ema = ModelEMA(self.model)
                 if self.args.plots and not self.args.v5loader:
                     self.plot_training_labels()
@@ -353,7 +357,6 @@ class BaseTrainer:
                         if 'momentum' in x:
                             x['momentum'] = np.interp(ni, xi, [self.args.warmup_momentum, self.args.momentum])
 
-
                 # Forward
                 with torch.cuda.amp.autocast(self.amp):
                     batch = self.preprocess_batch(batch)
@@ -363,10 +366,14 @@ class BaseTrainer:
                     if self.args.task == "multi":
                         preds = self.model(batch[0]['img'])
                         for count in range(len(batch)):
-                            self.mul_loss[count], self.mul_loss_items[count] = self.criterion(preds[count], batch[count], self.data['labels_list'][count],count)
+                            self.mul_loss[count], self.mul_loss_items[count] = self.criterion(preds[count],
+                                                                                              batch[count],
+                                                                                              self.data['labels_list'][
+                                                                                                  count], count)
                             if RANK != -1:
                                 self.mul_loss[count] *= world_size
-                            self.subloss[count] = (self.subloss[count] * i + self.mul_loss_items[count]) / (i + 1) if self.subloss[count] is not None \
+                            self.subloss[count] = (self.subloss[count] * i + self.mul_loss_items[count]) / (i + 1) if \
+                                self.subloss[count] is not None \
                                 else self.mul_loss_items[count]
                         self.loss = sum(self.mul_loss)
                         self.tloss = self.subloss
@@ -385,7 +392,8 @@ class BaseTrainer:
                 #     if param.grad is None:
                 #         print(f"Parameter '{name}' does not have a gradient.")
 
-                self.scaler.scale(self.loss).backward(retain_graph=False)  ######Jiayuan retain_graph=False Free the GPU memory,
+                self.scaler.scale(self.loss).backward(
+                    retain_graph=False)  ######Jiayuan retain_graph=False Free the GPU memory,
                 ###### Due to we just use backward once, so we can safely set the retain_graph=False
 
                 # Optimize - https://pytorch.org/docs/master/notes/amp_examples.html
@@ -447,7 +455,9 @@ class BaseTrainer:
                 if self.args.task == 'multi':
                     if self.args.val:
                         for i in range(len(losses)):
-                            self.save_metrics(metrics={**self.label_loss_items_val(self.tloss[i],prefix='train',task=self.data['labels_list'][i]), **self.metrics[i], **self.lr})
+                            self.save_metrics(metrics={**self.label_loss_items_val(self.tloss[i], prefix='train',
+                                                                                   task=self.data['labels_list'][i]),
+                                                       **self.metrics[i], **self.lr})
                         self.stop = self.stopper(epoch + 1, sum(self.fitness))
                 else:
                     self.save_metrics(metrics={**self.label_loss_items(self.tloss), **self.metrics, **self.lr})
@@ -483,6 +493,7 @@ class BaseTrainer:
             # self.run_callbacks('on_train_end')
         torch.cuda.empty_cache()
         # self.run_callbacks('teardown')
+        dist.destroy_process_group()
 
     def save_model(self):
         """Save model checkpoints based on various conditions."""
@@ -563,14 +574,15 @@ class BaseTrainer:
             fitness_list = []
             for metrics in metrics_list:
                 fitness_list.append(metrics.pop('fitness',
-                                      -self.loss.detach().cpu().numpy()))  # use loss as fitness measure if not found
+                                                -self.loss.detach().cpu().numpy()))  # use loss as fitness measure if not found
             fitness = sum(fitness_list)
             if not self.best_fitness or self.best_fitness < fitness:
                 self.best_fitness = fitness
             return metrics_list, fitness_list
         else:
             metrics = self.validator(self)
-            fitness = metrics.pop('fitness', -self.loss.detach().cpu().numpy())  # use loss as fitness measure if not found
+            fitness = metrics.pop('fitness',
+                                  -self.loss.detach().cpu().numpy())  # use loss as fitness measure if not found
             if not self.best_fitness or self.best_fitness < fitness:
                 self.best_fitness = fitness
             return metrics, fitness
@@ -778,7 +790,7 @@ def check_amp(model):
     def amp_allclose(m, im):
         """All close FP32 vs AMP results."""
         a = m(im, device=device, verbose=False)[0].boxes.data  # FP32 inference
-        with torch.cuda.amp.autocast(True):
+        with torch.amp.autocast('cuda', enabled=True):
             b = m(im, device=device, verbose=False)[0].boxes.data  # AMP inference
         del m
         return a.shape == b.shape and torch.allclose(a, b.float(), atol=0.5)  # close to 0.5 absolute tolerance
