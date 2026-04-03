@@ -8,5 +8,16 @@ if __name__ == '__main__':
     # model = YOLO("C:/Users/FRDISI/Desktop/[phD]yolov8_improve/YOLOv8-multi-task-PLCable/ultralytics/models/v8/yolov8-seg.yaml", task='multi')#.load('yolov8n.pt') # build a new model from YAML
 
     model.train(data='/home/hutao/data1/FAN/YOLOv8-multi-task-PLCable-Colab/ultralytics/datasets/bdd-multi-Cable.yaml',
-                rect=True, batch=32, epochs=150, imgsz=(640, 640), device=[0, 1], name='train', val=True,
-                task='multi', pretrained=False, cache=False)  # rect=True
+                epochs=150,
+                batch=32,
+                imgsz=(640, 640),
+                device=[0, 1],
+                name='train',
+                pretrained=False,
+                rect=True,  # !-- Keep this line --!
+                task='multi',
+                cls=2.0,
+                degrees=10.0,
+                scale=0.6,
+                mixup=0.15,
+                copy_paste=0.1)

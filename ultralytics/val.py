@@ -8,10 +8,10 @@ if __name__ == '__main__':
 
     # model = YOLO('yolov8s-seg.pt')
     #number = 1 #input how many tasks in your work
-    model = YOLO('/home/hutao/data1/FAN/YOLOv8-multi-task-PLCable-Colab/runs/multi/train2/weights/best.pt')  # 加载自己训练的模型# Validate the model
+    model = YOLO('/home/hutao/data1/FAN/YOLOv8-multi-task-PLCable-Colab/runs/multi/train3/weights/best.pt')  # 加载自己训练的模型# Validate the model
     # metrics = model.val(data='/home/jiayuan/ultralytics-main/ultralytics/datasets/bdd-multi.yaml',device=[4],task='multi',name='v3-model-val',iou=0.6,conf=0.001, imgsz=(640,640),classes=[2,3,4,9,10,11],combine_class=[2,3,4,9],single_cls=True)  # no arguments needed, dataset and settings remembered
 
-    metrics = model.val(data='/home/hutao/data1/FAN/YOLOv8-multi-task-PLCable-Colab/ultralytics/datasets/bdd-multi-Cable.yaml',device=[0],task='multi',name='val',iou=0.6,conf=0.001,batch=1)  # batch 1 cause onnx and tensort do only batch 1 #no arguments needed, dataset and settings remembered
+    metrics = model.val(data='/home/hutao/data1/FAN/YOLOv8-multi-task-PLCable-Colab/ultralytics/datasets/bdd-multi-Cable.yaml',device=[0],task='multi',name='val',iou=0.6,conf=0.25,batch=1)  # batch 1 cause onnx and tensort do only batch 1 #no arguments needed, dataset and settings remembered
 """    for i in range(number):
          print(f'This is for {i} work')
          print(metrics[i].box.map)    # map50-95
