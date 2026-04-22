@@ -13,7 +13,7 @@ from .transformer import TransformerBlock
 __all__ = [
     'DFL', 'HGBlock', 'HGStem', 'SPP', 'SPPF', 'C1', 'C2', 'C3', 'C2f', 'C3x', 'C3TR', 'C3Ghost', 'GhostBottleneck',
     'Bottleneck', 'BottleneckCSP', 'Proto', 'RepC3',
-    "Attention", "C3k", "C3k2", "C2PSA", "CoordAttDistillation", "EdgeEnhancer", "SimAM"]  # New blocks
+    "Attention", "C3k", "C3k2", "C2PSA", "CoordAttDistillation", "EdgeEnhancer", "SimAM", "YOLOGraphBlock"]  # New blocks
 
 
 class DFL(nn.Module):
@@ -590,3 +590,109 @@ class SimAM(nn.Module):
         x_minus_mu_sq = (x - x.mean(dim=[2, 3], keepdim=True)).pow(2)
         y = x_minus_mu_sq / (4 * (x_minus_mu_sq.sum(dim=[2, 3], keepdim=True) / n + self.e_lambda)) + 0.5
         return x * self.activation(y)
+
+#graph
+
+import math
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.nn.parameter import Parameter
+
+'''oldYOLOGraphBlock'''
+class GraphConvolution(nn.Module):
+    """
+    simple GCN layer
+    x:   [B, N, Fin]
+    adj: [B, N, N]
+    out: [B, N, Fout]
+    """
+
+    def __init__(self, in_features, out_features, bias=True):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+
+        self.weight = Parameter(torch.empty(in_features, out_features))
+        nn.init.xavier_uniform_(self.weight, gain=1.414)
+
+        if bias:
+            self.bias = Parameter(torch.zeros(1, 1, out_features, dtype=torch.float32))
+        else:
+            self.register_parameter("bias", None)
+
+    def forward(self, x, adj):
+        support = torch.matmul(x, self.weight)
+        if self.bias is not None:
+            support = support + self.bias
+        out = torch.matmul(adj, support)
+        return F.relu(out)
+
+class YOLOGraphBlock(nn.Module):
+    """
+    将 YOLO 特征图 [B, C, H, W]
+    -> 固定网格节点
+    -> 构图
+    -> GCN
+    -> 恢复回 [B, C, H, W]
+
+    这个版本不使用 BatchNorm1d，避免 batch=1 / node=1 时出错。
+    """
+
+    def __init__(self, c1, c2, patch_size=4, use_ln=True):
+        super().__init__()
+        self.patch_size = patch_size
+
+        self.pre_conv = Conv(c1, c2, 1, 1)
+        self.pool = nn.AvgPool2d(kernel_size=patch_size, stride=patch_size, ceil_mode=False)
+        self.gcn = GraphConvolution(c2, c2)
+        self.post_conv = Conv(c2, c2, 1, 1)
+
+        # 关键：LayerNorm 对 [B, N, C] 很稳，不怕 batch=1
+        self.norm = nn.LayerNorm(c2) if use_ln else nn.Identity()
+
+    def build_adj(self, nodes):
+        """
+        nodes: [B, N, C]
+        return: [B, N, N]
+        """
+        B, N, C = nodes.shape
+
+        # 节点相似度
+        sim = torch.bmm(nodes, nodes.transpose(1, 2)) / math.sqrt(C)
+        sim = F.relu(sim)
+
+        # 自环
+        eye = torch.eye(N, device=nodes.device, dtype=nodes.dtype).unsqueeze(0)
+        adj = sim + eye
+
+        # 对称归一化
+        deg = adj.sum(dim=-1).clamp(min=1.0)
+        deg_inv_sqrt = deg.pow(-0.5)
+        adj = deg_inv_sqrt.unsqueeze(-1) * adj * deg_inv_sqrt.unsqueeze(-2)
+        return adj
+
+    def forward(self, x):
+        """
+        x: [B, C, H, W]
+        """
+        B, C, H, W = x.shape
+
+        x = self.pre_conv(x)
+        x_pool = self.pool(x)  # [B, C2, Hp, Wp]
+
+        B, C2, Hp, Wp = x_pool.shape
+        nodes = x_pool.view(B, C2, -1).permute(0, 2, 1).contiguous()  # [B, N, C2]
+
+        adj = self.build_adj(nodes)
+        out = self.gcn(nodes, adj)  # [B, N, C2]
+
+        # LayerNorm 直接作用在最后一维 [C2]
+        out = self.norm(out)
+
+        out = out.permute(0, 2, 1).contiguous().view(B, C2, Hp, Wp)
+        out = F.interpolate(out, size=(H, W), mode="nearest")
+        out = self.post_conv(out)
+        return out
+
+'''V2'''
