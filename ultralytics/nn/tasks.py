@@ -16,6 +16,7 @@ from ultralytics.nn.modules import (AIFI, C1, C2, C3, C3TR, SPP, SPPF, Bottlenec
                                     Segment, Concat_dropout,
                                     Attention, C3k, C3k2, C2PSA, CoordAttDistillation, EdgeEnhancer,
                                     SimAM)  # New blocks
+from ultralytics.nn.modules.block import YOLOGraphBlock
 from ultralytics.yolo.utils import DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS, LOGGER, colorstr, emojis, yaml_load
 from ultralytics.yolo.utils.checks import check_requirements, check_suffix, check_yaml
 from ultralytics.yolo.utils.plotting import feature_visualization
@@ -834,7 +835,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
                 RFCAConv,
                 GSConv, VoVGSCSP, C2f_RFCAConv, C2f_DySnakeConv, C2f_DWR,
                 C3_AKConv, C2f_AKConv, AKConv,
-                Attention, C3k, C3k2, C2PSA, EdgeEnhancer):  # New blocks
+                Attention, C3k, C3k2, C2PSA, EdgeEnhancer, YOLOGraphBlock):  # New blocks
             c1, c2 = ch[f], args[0]
             if c2 != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
                 c2 = make_divisible(min(c2, max_channels) * width, 8)
